@@ -1,18 +1,20 @@
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
 import chromadb
 from llama_index.core import VectorStoreIndex, StorageContext, Settings
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.core import Document
 import logging
 import shutil
 import time
+import json
 
 logger = logging.getLogger(__name__)
 
 class VectorStore:
-    """Manage the ChromaDB vector store"""
+    """Manage the ChromaDB vector store with document tracking"""
     
     def __init__(self, vector_store_dir: Path, embedding_model: str, chunk_size: int, chunk_overlap: int):
         self.vector_store_dir = vector_store_dir
@@ -22,11 +24,14 @@ class VectorStore:
         self.chroma_client = None
         self.collection = None
         self.index = None
+        self.indexed_docs_file = vector_store_dir / "indexed_documents.json"
         
         # Initialize embedding model
+        logger.info(f"Initializing embedding model: {embedding_model}")
         self.embed_model = HuggingFaceEmbedding(
             model_name=embedding_model,
-            max_length=512
+            max_length=512,
+            embed_batch_size=32
         )
         Settings.embed_model = self.embed_model
         
@@ -36,76 +41,100 @@ class VectorStore:
             chunk_overlap=chunk_overlap
         )
     
+    def exists(self) -> bool:
+        """Check if vector store exists"""
+        return self.vector_store_dir.exists() and self.indexed_docs_file.exists()
+    
+    def get_indexed_documents(self) -> Set[str]:
+        """Get set of indexed document names"""
+        if not self.indexed_docs_file.exists():
+            return set()
+        
+        try:
+            with open(self.indexed_docs_file, 'r') as f:
+                return set(json.load(f))
+        except Exception as e:
+            logger.error(f"Error reading indexed documents: {e}")
+            return set()
+    
+    def _save_indexed_documents(self, doc_names: Set[str]):
+        """Save the set of indexed document names"""
+        try:
+            self.vector_store_dir.mkdir(exist_ok=True)
+            with open(self.indexed_docs_file, 'w') as f:
+                json.dump(list(doc_names), f, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving indexed documents: {e}")
+    
     def close(self):
         """Close ChromaDB client connections"""
         if self.chroma_client:
             try:
-                # ChromaDB doesn't have an explicit close method, but we can reset the client
                 self.chroma_client = None
                 self.collection = None
-                # Give it a moment to release file locks
                 time.sleep(0.5)
             except Exception as e:
                 logger.warning(f"Error closing ChromaDB client: {e}")
     
-    def create_index(self, documents: List, overwrite: bool = False):
+    def create_index(self, documents: List[Document], overwrite: bool = False) -> bool:
         """Create vector index from documents"""
-        if self.vector_store_dir.exists() and not overwrite:
+        if self.exists() and not overwrite:
             logger.info("Vector store already exists. Use overwrite=True to recreate.")
             return False
         
         if overwrite and self.vector_store_dir.exists():
-            # Close any existing connections first
             self.close()
             
-            # Try to remove the directory
             try:
                 shutil.rmtree(self.vector_store_dir)
                 logger.info("Removed existing vector store")
-            except PermissionError:
-                # On Windows, sometimes files are locked. Try alternative approach
-                logger.warning("Could not remove vector store directory, trying alternative approach")
-                import os
-                # Close all file handles and retry
-                import gc
-                gc.collect()
-                time.sleep(1)
-                try:
-                    shutil.rmtree(self.vector_store_dir)
-                except Exception as e:
-                    logger.error(f"Failed to remove vector store: {e}")
-                    logger.info("Creating new collection in existing database")
+            except Exception as e:
+                logger.error(f"Failed to remove vector store: {e}")
+                # Try to continue anyway
         
-        # Initialize ChromaDB
-        self.chroma_client = chromadb.PersistentClient(path=str(self.vector_store_dir))
-        
-        # Try to delete existing collection if it exists
         try:
-            self.chroma_client.delete_collection("documents")
-        except Exception:
-            pass  # Collection doesn't exist, that's fine
-        
-        self.collection = self.chroma_client.create_collection("documents")
-        
-        # Create vector store
-        vector_store = ChromaVectorStore(chroma_collection=self.collection)
-        storage_context = StorageContext.from_defaults(vector_store=vector_store)
-        
-        # Create index
-        logger.info(f"Creating index from {len(documents)} documents...")
-        self.index = VectorStoreIndex.from_documents(
-            documents,
-            storage_context=storage_context,
-            show_progress=True
-        )
-        
-        logger.info("Vector store created successfully")
-        return True
+            # Ensure directory exists
+            self.vector_store_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Initialize ChromaDB
+            self.chroma_client = chromadb.PersistentClient(path=str(self.vector_store_dir))
+            
+            # Delete existing collection if it exists
+            try:
+                self.chroma_client.delete_collection("documents")
+            except Exception:
+                pass
+            
+            self.collection = self.chroma_client.create_collection("documents")
+            
+            # Create vector store
+            vector_store = ChromaVectorStore(chroma_collection=self.collection)
+            storage_context = StorageContext.from_defaults(vector_store=vector_store)
+            
+            # Create index
+            logger.info(f"Creating index from {len(documents)} documents...")
+            self.index = VectorStoreIndex.from_documents(
+                documents,
+                storage_context=storage_context,
+                show_progress=True
+            )
+            
+            # Save indexed document names
+            doc_names = {doc.metadata.get('file_name', f'doc_{i}') 
+                        for i, doc in enumerate(documents)}
+            self._save_indexed_documents(doc_names)
+            
+            logger.info("Vector store created successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error creating vector store: {e}")
+            return False
     
-    def load_index(self):
+    def load_index(self) -> bool:
         """Load existing vector index"""
-        if not self.vector_store_dir.exists():
-            logger.error("Vector store directory does not exist")
+        if not self.exists():
+            logger.error("Vector store does not exist")
             return False
         
         try:
@@ -130,10 +159,54 @@ class VectorStore:
             
             logger.info("Vector store loaded successfully")
             return True
+            
         except Exception as e:
             logger.error(f"Error loading vector store: {e}")
             return False
     
+    def add_documents(self, documents: List[Document]) -> bool:
+        """Add new documents to existing vector store"""
+        if not self.exists():
+            logger.error("Vector store does not exist")
+            return False
+        
+        try:
+            # Load index if not already loaded
+            if not self.index:
+                if not self.load_index():
+                    return False
+            
+            # Get current indexed documents
+            indexed_docs = self.get_indexed_documents()
+            
+            # Add each document
+            for doc in documents:
+                try:
+                    # Insert into index
+                    self.index.insert(doc)
+                    
+                    # Track document name
+                    doc_name = doc.metadata.get('file_name', 'unknown')
+                    indexed_docs.add(doc_name)
+                    logger.info(f"Added document: {doc_name}")
+                    
+                except Exception as e:
+                    logger.error(f"Error adding document: {e}")
+                    continue
+            
+            # Save updated indexed documents list
+            self._save_indexed_documents(indexed_docs)
+            
+            logger.info(f"Successfully added {len(documents)} documents")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding documents: {e}")
+            return False
+    
     def get_index(self) -> Optional[VectorStoreIndex]:
         """Get the vector index"""
+        if not self.index and self.exists():
+            self.load_index()
         return self.index
+        
