@@ -1,11 +1,7 @@
 from pathlib import Path
 from typing import List, Dict, Any
 from llama_index.core import Document
-from llama_index.readers.file import (
-    PDFReader,
-    UnstructuredReader,
-    SimpleDirectoryReader
-)
+from llama_index.readers.file import PDFReader
 import logging
 import chardet
 
@@ -37,26 +33,22 @@ class DocumentLoader:
             return 'utf-8'
     
     def load_text_file(self, file_path: Path) -> List[Document]:
-        """Load a text file with encoding detection"""
         try:
-            # Detect encoding
             encoding = self.detect_encoding(file_path)
-            
-            # Read file
             with open(file_path, 'r', encoding=encoding, errors='replace') as f:
                 content = f.read()
             
-            # Create document
-            metadata = {
+            # Add BOM handling for UTF-8
+            if content.startswith('\ufeff'):
+                content = content[1:]
+            
+            return [Document(text=content, metadata={
                 'file_name': file_path.name,
                 'file_type': file_path.suffix,
                 'encoding': encoding
-            }
-            
-            return [Document(text=content, metadata=metadata)]
-            
+            })]
         except Exception as e:
-            logger.error(f"Error loading text file {file_path}: {e}")
+            logger.error(f"Text load error: {file_path} - {e}")
             return []
     
     def load_pdf_file(self, file_path: Path) -> List[Document]:

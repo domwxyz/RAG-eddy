@@ -1,7 +1,6 @@
 from typing import List, Optional
 from llama_index.core import PromptTemplate, Settings
 from llama_index.core.postprocessor import SimilarityPostprocessor
-from llama_index.core.response.schema import Response
 from llama_index.core.schema import NodeWithScore
 import logging
 
@@ -67,28 +66,33 @@ class QueryEngine:
             logger.error(f"Error initializing query engine: {e}")
             return False
     
-    def query(self, query_text: str) -> Response:
-        """Process a query and return response"""
+    def query(self, query_text: str):
         if not self.query_engine:
             raise ValueError("Query engine not initialized")
         
         try:
-            # Get streaming response
             response = self.query_engine.query(query_text)
-            
-            # Stream the response
             full_response = ""
-            for text in response.response_gen:
-                print(text, end='', flush=True)
-                full_response += text
             
-            # Create a response object with the full text for source formatting
+            # Handle streaming safely
+            if hasattr(response, 'response_gen'):
+                print("\nRAG-eddy: ", end='', flush=True)
+                for text in response.response_gen:
+                    print(text, end='', flush=True)
+                    full_response += text
+                print()  # Ensure new line after response
+            else:
+                full_response = str(response)
+                print(f"\nRAG-eddy: {full_response}")
+            
+            # Preserve response for source formatting
             response.response = full_response
             return response
             
         except Exception as e:
             logger.error(f"Error processing query: {e}")
-            raise
+            print(f"\n❌ Error: {e}")
+            return None  # Return None instead of crashing
     
     def format_sources(self, source_nodes: List[NodeWithScore]) -> str:
         """Format source documents in a clean way"""
@@ -123,4 +127,3 @@ class QueryEngine:
                 continue
         
         return "\n".join(output) if len(output) > 1 else ""
-        

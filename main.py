@@ -44,53 +44,45 @@ class RAGeddy:
         logger.info(f"Archive directory: {config.ARCHIVE_DIR}")
     
     def _print_header(self):
-        """Print application header"""
+        """Improved application header"""
         print("\n" + "="*60)
-        print("🤖 RAG-eddy: Your Document Chat Assistant")
+        print("🤖 RAG-eddy: Document Chat Assistant".center(60))
+        print("="*60)
+        print(f"📁 Archive: {config.ARCHIVE_DIR}".center(60))
+        print(f"💾 Vector Store: {config.VECTOR_STORE_DIR}".center(60))
         print("="*60)
     
     def _print_menu(self):
-        """Print main menu"""
-        print("\n📋 Main Menu:")
+        """Enhanced menu with clearer options"""
+        print("\n📋 MAIN MENU:")
         print("1. 💬 Chat with documents")
-        print("2. 🔨 Create/rebuild vector store")
-        print("3. 🔄 Update vector store (add new documents)")
-        print("4. 📄 List documents in archive")
-        print("5. ℹ️  Show system info")
+        print("2. 🔨 Create/Rebuild vector index")
+        print("3. 🔄 Update index (add new documents)")
+        print("4. 📄 View document archive")
+        print("5. ℹ️  System information")
         print("6. 🚪 Exit")
-        print("-"*40)
+        print("-"*60)
     
     def run(self):
-        """Main application loop"""
         self._print_header()
-        
         while True:
-            self._print_menu()
-            
             try:
-                choice = input("Enter your choice (1-6): ").strip()
+                self._print_menu()
+                choice = input(">>> Select option (1-6): ").strip()
                 
-                if choice == '1':
-                    self.chat_interface()
-                elif choice == '2':
-                    self.create_vector_store()
-                elif choice == '3':
-                    self.update_vector_store()
-                elif choice == '4':
-                    self.list_documents()
-                elif choice == '5':
-                    self.show_system_info()
-                elif choice == '6':
+                if choice == '1': self.chat_interface()
+                elif choice == '2': self.create_vector_store()
+                elif choice == '3': self.update_vector_store()
+                elif choice == '4': self.list_documents()
+                elif choice == '5': self.show_system_info()
+                elif choice == '6': 
                     print("\n👋 Goodbye!")
                     break
                 else:
-                    print("❌ Invalid choice. Please try again.")
-                    
-            except KeyboardInterrupt:
-                print("\n\n⚠️  Use option 6 to exit properly.")
+                    print("⚠️  Invalid choice. Please try again.")
             except Exception as e:
-                logger.error(f"Error: {e}")
-                print(f"\n❌ Error: {e}")
+                logger.error(f"Menu error: {e}")
+                print(f"❌ System error: {e}")
     
     def chat_interface(self):
         """Interactive chat with documents"""
@@ -113,37 +105,35 @@ class RAGeddy:
                 return
         
         print("\n" + "="*60)
-        print("💬 Chat Mode - Type 'exit' to return to main menu")
+        print("💬 CHAT MODE - Type '/exit' to return to menu")
         print("💡 Tip: Ask questions about your documents!")
         print("="*60 + "\n")
         
         while True:
             try:
                 user_input = input("You: ").strip()
-                
-                if user_input.lower() in ['exit', 'quit', 'back']:
+                if user_input.lower() in ['/exit', '/quit']:
                     break
                 
                 if not user_input:
                     continue
                 
-                # Query and stream response
-                print("\nRAG-eddy: ", end='', flush=True)
-                
+                # Handle query safely
                 response = self.query_engine.query(user_input)
+                if not response:
+                    print("⚠️  No response received. Please try again.")
+                    continue
                 
-                # Print sources if available
-                if hasattr(response, 'source_nodes') and response.source_nodes:
+                # Print sources
+                if response and hasattr(response, 'source_nodes'):
                     sources = self.query_engine.format_sources(response.source_nodes)
-                    print(f"\n\n{sources}")
-                
-                print()  # New line after response
+                    print(f"\n{sources}")
                 
             except KeyboardInterrupt:
-                print("\n\n⚠️  Type 'exit' to return to main menu.")
+                print("\n⚠️  Type '/exit' to return to menu")
             except Exception as e:
-                logger.error(f"Chat error: {e}")
-                print(f"\n❌ Error: {e}")
+                print(f"❌ Error: {e}")
+        print("Returning to main menu...")
     
     def create_vector_store(self):
         """Create or rebuild the vector store"""

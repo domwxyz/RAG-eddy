@@ -24,53 +24,46 @@ class LLMManager:
         self.models_dir.mkdir(exist_ok=True)
     
     def initialize(self) -> bool:
-        """Initialize the LLM"""
         try:
-            # Get local model path
             model_name = os.path.basename(self.model_url)
-            local_model_path = self.models_dir / model_name
+            local_path = self.models_dir / model_name
             
-            # Download model if not exists
-            if not local_model_path.exists():
-                logger.info(f"Downloading model: {model_name}")
-                if not self._download_model(self.model_url, local_model_path):
+            # Download with progress if needed
+            if not local_path.exists():
+                print(f"⏳ Downloading model: {model_name}")
+                if not self._download_model(self.model_url, local_path):
                     return False
             else:
-                logger.info(f"Using existing model: {model_name}")
+                print(f"✅ Using existing model: {model_name}")
             
-            # Initialize LlamaCPP
-            logger.info(f"Loading model: {model_name}")
+            # Initialize with better default parameters
             self.llm = LlamaCPP(
-                model_path=str(local_model_path),
+                model_path=str(local_path),
                 temperature=self.temperature,
                 max_new_tokens=self.max_tokens,
-                context_window=4096,
+                context_window=8192,  # Increased for better context
                 model_kwargs={
-                    "n_threads": self.num_threads,
+                    "n_threads": max(4, self.num_threads),  # Ensure minimum threads
                     "n_batch": 512,
-                    "use_mlock": True,
-                    "n_gpu_layers": 0  # CPU only for compatibility
-                },
-                verbose=False
+                    "n_gpu_layers": 0,
+                    "verbose": False
+                }
             )
             
-            # Set as default LLM
-            Settings.llm = self.llm
-            
-            # Test the model
-            logger.info("Testing LLM...")
-            test_response = self.llm.complete("Hello")
-            if not test_response:
-                logger.error("LLM test failed")
+            # Simple test instead of complex validation
+            try:
+                test_response = self.llm.complete("Hello")
+                if not test_response.text.strip():
+                    raise ValueError("Empty test response")
+            except Exception as e:
+                logger.error(f"Model test failed: {e}")
                 return False
             
-            logger.info("LLM initialized successfully")
+            Settings.llm = self.llm
+            print("✅ LLM ready")
             return True
-            
         except Exception as e:
-            logger.error(f"Error initializing LLM: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"LLM init failed")
             return False
     
     def _download_model(self, url: str, local_path: Path) -> bool:

@@ -77,58 +77,41 @@ class VectorStore:
                 logger.warning(f"Error closing ChromaDB client: {e}")
     
     def create_index(self, documents: List[Document], overwrite: bool = False) -> bool:
-        """Create vector index from documents"""
-        if self.exists() and not overwrite:
-            logger.info("Vector store already exists. Use overwrite=True to recreate.")
-            return False
-        
-        if overwrite and self.vector_store_dir.exists():
-            self.close()
-            
-            try:
-                shutil.rmtree(self.vector_store_dir)
-                logger.info("Removed existing vector store")
-            except Exception as e:
-                logger.error(f"Failed to remove vector store: {e}")
-                # Try to continue anyway
-        
         try:
-            # Ensure directory exists
+            if self.exists() and overwrite:
+                print("♻️ Removing existing vector store...")
+                self.close()
+                shutil.rmtree(self.vector_store_dir, ignore_errors=True)
+            
             self.vector_store_dir.mkdir(parents=True, exist_ok=True)
             
             # Initialize ChromaDB
             self.chroma_client = chromadb.PersistentClient(path=str(self.vector_store_dir))
             
-            # Delete existing collection if it exists
-            try:
-                self.chroma_client.delete_collection("documents")
-            except Exception:
-                pass
-            
-            self.collection = self.chroma_client.create_collection("documents")
+            # Create new collection
+            self.collection = self.chroma_client.get_or_create_collection("documents")
             
             # Create vector store
             vector_store = ChromaVectorStore(chroma_collection=self.collection)
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
             
-            # Create index
-            logger.info(f"Creating index from {len(documents)} documents...")
+            # Create index with progress
+            print("🔧 Building vector index...")
             self.index = VectorStoreIndex.from_documents(
                 documents,
                 storage_context=storage_context,
                 show_progress=True
             )
             
-            # Save indexed document names
+            # Save indexed documents
             doc_names = {doc.metadata.get('file_name', f'doc_{i}') 
                         for i, doc in enumerate(documents)}
             self._save_indexed_documents(doc_names)
             
-            logger.info("Vector store created successfully")
+            print("✅ Vector store created")
             return True
-            
         except Exception as e:
-            logger.error(f"Error creating vector store: {e}")
+            logger.exception("Vector store creation failed")
             return False
     
     def load_index(self) -> bool:

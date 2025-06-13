@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+VERSION = "1.0.0"
+
 # Base paths
 BASE_DIR = Path(__file__).parent
 ARCHIVE_DIR = BASE_DIR / "archive"
@@ -49,3 +51,6 @@ Your responses should be:
 - Friendly and conversational
 
 If you cannot find the answer in the provided context, be honest about it and suggest what information might be helpful."""
+
+if __name__ == "__main__":
+    print(f"RAG-eddy v{VERSION} Configuration")
